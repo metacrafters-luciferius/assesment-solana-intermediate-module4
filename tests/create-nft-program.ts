@@ -5,8 +5,8 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL, Keypair, SystemProgram, SYSVAR
 import { safeAirdrop, delay } from './utils/utils'
 import { BN } from "bn.js"
 import { Key, PROGRAM_ID as METADATA_PROGRAM_ID } from '@metaplex-foundation/mpl-token-metadata'
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token'
-import { assert } from "chai"
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID, getAccount, getNonTransferable } from '@solana/spl-token'
+import { assert, expect } from "chai"
 
 describe("create-nft-demo", async () => {
   anchor.setProvider(anchor.AnchorProvider.env())
@@ -33,10 +33,22 @@ describe("create-nft-demo", async () => {
     program.programId
   )
 
-  const program_authority = PublicKey.findProgramAddressSync(
+  const programAuthority = PublicKey.findProgramAddressSync(
     [Buffer.from("authority")],
     program.programId
   )
+
+  const tokenMint = PublicKey.findProgramAddressSync(
+    [Buffer.from("token-mint")],
+    program.programId
+  )
+
+  const mintAuthority = PublicKey.findProgramAddressSync(
+    [Buffer.from("mint-authority")],
+    program.programId
+  )
+  
+  const rewardTokenAccount = await getAssociatedTokenAddress(tokenMint[0], user.publicKey)
 
   it("Create and mint NFT!", async () => {
     await safeAirdrop(user.publicKey, provider.connection)
@@ -79,11 +91,73 @@ describe("create-nft-demo", async () => {
       metadataProgram: METADATA_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
-      programAuthority: program_authority[0]
+      programAuthority: programAuthority[0]
     })
     .signers([user])
     .rpc()
-    console.log("View transaction in explorer:")
+    console.log("View staking transaction in explorer:")
     console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+
+    const tokenAccountInfo = await getAccount(
+      provider.connection,
+      userTokenAccount
+    );
+    expect(tokenAccountInfo.isFrozen).to.be.true;
+    expect(tokenAccountInfo.amount).to.equal(BigInt(1));
+  })
+
+  it.skip("Initialize mint.", async () => {
+    const txid = await program.methods.initializeMint()
+    .accounts({
+      payer: provider.wallet.publicKey,
+      tokenMint: tokenMint[0],
+      mintAuthority: mintAuthority[0],
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY
+    })
+    .rpc()
+    console.log("View initialize mint transaction in explorer:")
+    console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+  })
+
+  it("Unstake NFT.", async () => {
+    //wait at least 1s to get at least one reward token
+    await delay(1000)
+
+    const txid = await program.methods.unstake()
+    .accounts({
+      user: user.publicKey,
+      nftMint: nftMint.publicKey,
+      stake: stake[0],
+      nftTokenAccount: userTokenAccount,
+      masterEdition: masterEdition,
+      programAuthority: programAuthority[0],
+      tokenMint: tokenMint[0],
+      mintAuthority: mintAuthority[0],
+      userTokenAccount: rewardTokenAccount,
+      metadataProgram: METADATA_PROGRAM_ID,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      rent: SYSVAR_RENT_PUBKEY
+    })
+    .signers([user])
+    .rpc()
+    console.log("View unstake transaction in explorer:")
+    console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+
+    const nftAccountInfo = await getAccount(
+      provider.connection,
+      userTokenAccount
+    );
+    expect(nftAccountInfo.isFrozen).to.be.false;
+    expect(nftAccountInfo.delegate).to.be.null;
+    
+    const tokenAccountInfo = await getAccount(
+      provider.connection,
+      rewardTokenAccount
+    );
+    expect(Number.parseInt(tokenAccountInfo.amount.toString())).to.be.greaterThanOrEqual(1);
   })
 })
