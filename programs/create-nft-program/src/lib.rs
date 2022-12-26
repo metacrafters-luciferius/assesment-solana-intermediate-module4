@@ -1,14 +1,14 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{token::{Mint, TokenAccount, Token, MintTo}, associated_token::AssociatedToken};
+use anchor_spl::{token::{Mint, TokenAccount, Token, MintTo, Approve}, associated_token::AssociatedToken};
 use mpl_token_metadata::{ID as METADATA_PROGRAM_ID};
 
 declare_id!("AHqbhaYrNwAXhH7X4w8cC8y26P2PAATBKzWMnEZP5hnq");
 
 #[program]
 pub mod create_nft_program {
-    use anchor_spl::token::mint_to;
-    use mpl_token_metadata::{instruction::{create_metadata_accounts_v3, create_master_edition_v3}, state::Creator};
-    use solana_program::program::invoke;
+    use anchor_spl::token::{mint_to, approve};
+    use mpl_token_metadata::{instruction::{create_metadata_accounts_v3, create_master_edition_v3, freeze_delegated_account}, state::Creator};
+    use solana_program::program::{invoke, invoke_signed};
 
     use super::*;
 
@@ -80,6 +80,43 @@ pub mod create_nft_program {
 
         Ok(())
     }
+
+    pub fn stake(ctx: Context<StakeNFT>) -> Result<()> {
+        //let user = ctx.accounts.user.key();
+        //let signer = &[user.as_ref()];
+        //approve(ctx.accounts.approve_ctx().with_signer(&[&signer[..]]), 1)?;
+        approve(ctx.accounts.approve_ctx(), 1)?;
+
+        let authority_bump = *ctx.bumps.get("program_authority").unwrap();
+        let authority_seeds = &["authority".as_bytes(), &[authority_bump]];
+        let signer = &[&authority_seeds[..]];
+
+        let freeze_ix = freeze_delegated_account(
+            ctx.accounts.metadata_program.key(), 
+            ctx.accounts.program_authority.key(), 
+            ctx.accounts.user_token_account.key(), 
+            ctx.accounts.master_edition.key(), 
+            ctx.accounts.nft_mint.key()
+        );
+
+        invoke_signed(
+            &freeze_ix, 
+            &[
+                ctx.accounts.metadata_program.to_account_info(),
+                ctx.accounts.program_authority.to_account_info(),
+                ctx.accounts.user_token_account.to_account_info(),
+                ctx.accounts.master_edition.to_account_info(),
+                ctx.accounts.nft_mint.to_account_info()
+            ],
+            signer
+        )?;
+
+        msg!("Staked NFT successfully.");
+
+        ctx.accounts.stake.timestamp = Clock::get()?.unix_timestamp;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -135,6 +172,59 @@ impl <'info> CreateNFT<'info> {
             mint: self.nft_mint.to_account_info(),
             to: self.user_token_account.to_account_info(),
             authority: self.user.to_account_info(),
+        };
+
+        CpiContext::new(cpi_program, cpi_accounts)
+    }
+}
+
+#[derive(Accounts)]
+pub struct StakeNFT<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub nft_mint: Account<'info, Mint>,
+    #[account(
+        init,
+        payer = user,
+        seeds = [user.key().as_ref(), user_token_account.key().as_ref()],
+        bump,
+        space = 8 + 8
+    )]
+    pub stake: Account<'info, StakingData>,
+    #[account(
+        mut,
+        associated_token::mint = nft_mint,
+        associated_token::authority = user
+    )]
+    pub user_token_account: Account<'info, TokenAccount>,
+    /// CHECK: Manual validation
+    #[account(owner=METADATA_PROGRAM_ID)]
+    pub master_edition: UncheckedAccount<'info>,
+    /// CHECK: Manual validation
+    #[account(mut, seeds=["authority".as_bytes().as_ref()], bump)]
+    pub program_authority: UncheckedAccount<'info>,
+    /// CHECK: Safe because verification through contraint
+    #[account(
+        constraint = metadata_program.key() == METADATA_PROGRAM_ID
+    )]
+    pub metadata_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[account]
+pub struct StakingData{
+    pub timestamp: i64
+}
+
+impl <'info> StakeNFT<'info> {
+    pub fn approve_ctx(&self) -> CpiContext<'_, '_, '_, 'info, Approve<'info>>{
+        let cpi_program = self.token_program.to_account_info();
+        let cpi_accounts = Approve { 
+            to: self.user_token_account.to_account_info(), 
+            delegate: self.program_authority.to_account_info(), 
+            authority: self.user.to_account_info() 
         };
 
         CpiContext::new(cpi_program, cpi_accounts)

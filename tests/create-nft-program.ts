@@ -14,7 +14,6 @@ describe("create-nft-demo", async () => {
   const program = anchor.workspace.CreateNftProgram as Program<CreateNftProgram>
   const provider = anchor.AnchorProvider.env()
 
-
   const nftMint = Keypair.generate()
   const user = Keypair.generate()
   const userTokenAccount = await getAssociatedTokenAddress(nftMint.publicKey, user.publicKey)
@@ -27,6 +26,16 @@ describe("create-nft-demo", async () => {
   const [masterEdition, masterBump] = PublicKey.findProgramAddressSync(
     [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), nftMint.publicKey.toBuffer(), Buffer.from("edition")],
     METADATA_PROGRAM_ID
+  )
+
+  const stake = PublicKey.findProgramAddressSync(
+    [user.publicKey.toBuffer(), userTokenAccount.toBuffer()],
+    program.programId
+  )
+
+  const program_authority = PublicKey.findProgramAddressSync(
+    [Buffer.from("authority")],
+    program.programId
   )
 
   it("Create and mint NFT!", async () => {
@@ -56,5 +65,25 @@ describe("create-nft-demo", async () => {
     console.log("View NFT in explorer:")
     console.log(`https://explorer.solana.com/address/${nftMint.publicKey}?cluster=devnet`)
 
+  })
+
+  it("Stake NFT!", async () => {
+    const txid = await program.methods.stake()
+    .accounts({
+      user: user.publicKey,
+      userTokenAccount: userTokenAccount,
+      nftMint: nftMint.publicKey,
+      stake: stake[0],
+      masterEdition: masterEdition,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      metadataProgram: METADATA_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+      programAuthority: program_authority[0]
+    })
+    .signers([user])
+    .rpc()
+    console.log("View transaction in explorer:")
+    console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
   })
 })
