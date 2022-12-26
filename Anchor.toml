@@ -2,13 +2,15 @@
 seeds = false
 skip-lint = false
 [programs.localnet]
-create_nft_program = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+create_nft_program = "AHqbhaYrNwAXhH7X4w8cC8y26P2PAATBKzWMnEZP5hnq"
+[programs.devnet]
+create_nft_program = "AHqbhaYrNwAXhH7X4w8cC8y26P2PAATBKzWMnEZP5hnq"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "/home/ubuntu/.config/solana/id.json"
 
 [scripts]
